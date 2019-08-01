@@ -1,0 +1,12 @@
+﻿  app.cpp
+c:\users\cudauser\desktop\finalproject - copy\finalproject\project5\app.cpp(20): warning C4101: 'status': unreferenced local variable
+c:\users\cudauser\desktop\finalproject - copy\finalproject\project5\app.cpp(19): warning C4101: 'comm': unreferenced local variable
+c:\users\cudauser\desktop\finalproject - copy\finalproject\project5\app.cpp(10): warning C4101: 'size': unreferenced local variable
+c:\users\cudauser\desktop\finalproject - copy\finalproject\project5\app.cpp(263): warning C4101: 'j': unreferenced local variable
+c:\users\cudauser\desktop\finalproject - copy\finalproject\project5\app.cpp(273): warning C4101: 'value': unreferenced local variable
+  project5.vcxproj -> C:\Users\cudauser\Desktop\finalProject - Copy\finalProject\x64\Debug\project5.exe
+  project5.vcxproj -> C:\Users\cudauser\Desktop\finalProject - Copy\finalProject\x64\Debug\project5.pdb (Full PDB)
+  copy "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.1\bin\cudart*.dll" "C:\Users\cudauser\Desktop\finalProject - Copy\finalProject\x64\Debug\"
+  C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.1\bin\cudart32_91.dll
+  C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.1\bin\cudart64_91.dll
+          2 file(s) copied.
