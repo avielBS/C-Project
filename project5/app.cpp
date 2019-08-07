@@ -36,7 +36,7 @@ int main(int argc, char *argv[])
 
 	a = a0;
 	
-	//2. create wights vector init by zeros use calloc
+	//2. create wights vector 
 	double* w = (double*)malloc((coordinatesOfPoints + 1) * sizeof(double));
 	
 	results = (double*)malloc((numberOfPoints) * sizeof(double));
