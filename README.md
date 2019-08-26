@@ -1,4 +1,4 @@
-# C-Project
+# Parallel implementation of Binary Classification
 
 the data file should be in c directory,
 
