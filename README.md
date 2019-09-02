@@ -2,8 +2,7 @@
 
 the data file should be in c directory,
 
-Binary Classification algorithm using Cuda and OMP 
-(should be later with mpi on diffrent computers)
+Binary Classification algorithm using  OMP MPI and Cuda
 
 Perceptron is usually used to classify the data into two parts.
 Therefore, it is also known as a Linear Binary Classifier.
