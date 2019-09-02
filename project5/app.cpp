@@ -1,6 +1,10 @@
 #include "app.h"
 #include <stdlib.h>
 
+#define INPUT "c:\\data.txt"
+#define OUTPUT "c:\\output.txt"
+
+
 
 int main(int argc, char *argv[])
 {
@@ -19,36 +23,70 @@ int main(int argc, char *argv[])
 	MPI_Comm comm;
 	MPI_Status status;
 
-	char fileName[] = "c:\\data.txt";
 	MPI_Datatype PointMPIDataType;
 	double* results = NULL;
 	Point* points = NULL;
 
-	Point* pointsInCuda = NULL;
-	double* resultsInCuda = NULL;
-	double* weightsInCuda = NULL;
 
 	int numberOfPoints, coordinatesOfPoints=0, limit;
-	double a, a0, aMax, qc, q;
+	double a, a0, aMax, qc, q ,otherProcessAlpha ,otherProcessQ;
 
-	points = readDataFromFile(fileName, points, &numberOfPoints, &coordinatesOfPoints, &a0, &aMax, &limit, &qc);
-	checkValidInputs(numberOfPoints, coordinatesOfPoints, a0, aMax, limit);
+	initPointDataType(&PointMPIDataType);
 
+	double x, fx;
+	int iteration = 0;
+
+	if (numprocs != 2)
+	{	
+		printf("please run this program with 2 proccess");
+		MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+	}
+
+
+	//  read and send data to second computer
+	if (myid == 0)
+	{
+		points = readDataFromFile(INPUT, points, &numberOfPoints, &coordinatesOfPoints, &a0, &aMax, &limit, &qc);
+		checkValidInputs(numberOfPoints, coordinatesOfPoints, a0, aMax, limit);
+		t1 = MPI_Wtime();	
+
+		MPI_Send(&numberOfPoints, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+		MPI_Send(points, numberOfPoints, PointMPIDataType, 1, 0, MPI_COMM_WORLD);
+		MPI_Send(&coordinatesOfPoints, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+		MPI_Send(&aMax, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+		MPI_Send(&limit, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+		MPI_Send(&qc, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+		MPI_Send(&a0, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+	}
+	else //recive the data 
+	{
+		MPI_Recv(&numberOfPoints, 1, MPI_INT, 0, 0, MPI_COMM_WORLD,&status);
+		points = (Point*)malloc(sizeof(Point)*(numberOfPoints));
+		
+		MPI_Recv(points, numberOfPoints, PointMPIDataType, 0, 0, MPI_COMM_WORLD, &status);
+		MPI_Recv(&coordinatesOfPoints, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
+		MPI_Recv(&aMax, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
+		MPI_Recv(&limit, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
+		MPI_Recv(&qc, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
+		MPI_Recv(&a0, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
+		a0 += a0;
+	}
+	
+	//1. a = a0
 	a = a0;
 	
-	//2. create wights vector 
+	//2. create wights vector
 	double* w = (double*)malloc((coordinatesOfPoints + 1) * sizeof(double));
-	
+
+	setArraysInGPU(points, w, numberOfPoints, coordinatesOfPoints);
+	//results array for cuda
 	results = (double*)malloc((numberOfPoints) * sizeof(double));
 	
-	setArraysInGPU(points, w, numberOfPoints, coordinatesOfPoints);
-
-	initPointDataType(&PointMPIDataType, coordinatesOfPoints);
 
 
-	t1 = MPI_Wtime();
 	while(a <= aMax)
 	{
+
 		fillWInZeros(w, coordinatesOfPoints + 1);
 		//3.	Cycle through all given points Xi in the order as it is defined in the input file
 
@@ -61,20 +99,19 @@ int main(int argc, char *argv[])
 		//5.	 Loop through stages 3-4 till one of following satisfies:
 		//			a.All given points are classified properly
 		//			b.The number maximum iterations LIMIT is reached
-		
-		int iteration = 0;
-		int x;
+		iteration = 0;
 		while (iteration < limit)
 		{
 			for (i = 0; i < numberOfPoints; i++)
 			{
-				x = points[i].classification - sign(scalarMult(w, &points[i]));
-				if (x) 
+				fx = f(w, &points[i]);
+				x = points[i].classification - sign(fx);
+				if(x)
 				{
-					updateWeights(w, &points[i], a, (int)sign(x));   
+					updateWeights(w, &points[i], a, (int)sign(x));    
 				}
 			}
-			
+
 			q = FindNmis(w,points,numberOfPoints,results,coordinatesOfPoints+1);
 			//All given points are classified properly 
 			int qIsLessThenQc = checkQuality(q, 0);
@@ -87,27 +124,60 @@ int main(int argc, char *argv[])
 		//		is not correct for those points. Calculate a Quality of Classifier q according the formula
 		//		q = Nmis / N
 		
+		
 		q = FindNmis(w, points, numberOfPoints, results, coordinatesOfPoints + 1);
 
 		// 7.	Check if the Quality of Classifier is reached 
 		int qIsLessThenQc = checkQuality(q, qc);
-		
 		// 8.	Stop if q < QC.
 		if (qIsLessThenQc)
 			break;
 
 		// 9.	Increment the value of a
-		a += a0;
-
+		if (myid == 0)
+			a += (a0 * 2);
+		else
+			a += a0;
 
 	}
 	//10.	Loop through stages 2-9
-	t2 = MPI_Wtime();
 
-	printWeights(w, (coordinatesOfPoints + 1));
-	printf("data : %s\nthe quality is %f \nqc: %f \nalpha %f\ntime: %f",fileName, q, qc, a,t2-t1);
+	if (myid == 0) //recive other computer result
+	{
+		MPI_Recv(&otherProcessAlpha, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, &status);
+		MPI_Recv(&otherProcessQ, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, &status);
+		double* weightFromOtherProcess = (double*)malloc((coordinatesOfPoints + 1) * sizeof(double));
+		MPI_Recv(weightFromOtherProcess, coordinatesOfPoints+1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, &status);
+		t2 = MPI_Wtime();
 
-	//free the data allocation
+		FILE* output = fopen(OUTPUT, "w");
+
+		if (a < otherProcessAlpha && checkQuality(q, qc))
+		{
+			writeWeights(w, (coordinatesOfPoints + 1),output);
+			fprintf(output,"data : %s\nthe quality is %f \nqc: %f \nalpha %f\ntime: %f", INPUT, q, qc, a, t2 - t1);
+		}
+		else if (otherProcessAlpha < a && checkQuality(otherProcessAlpha, qc))
+		{
+			writeWeights(weightFromOtherProcess, (coordinatesOfPoints + 1),output);
+			fprintf(output,"data : %s\nthe quality is %f \nqc: %f \nalpha %f\ntime: %f", INPUT, otherProcessQ, qc, otherProcessAlpha, t2 - t1);
+		}
+		else if(!checkQuality(q,qc) && !checkQuality(otherProcessQ,qc))
+			fprintf(output,"Alpha is not found");
+		
+		free(weightFromOtherProcess);
+		fclose(output);
+		printf("Output file is ready\n");
+	}
+	else //send to main process my result
+	{
+		MPI_Send(&a, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+		MPI_Send(&q, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+		MPI_Send(&w, coordinatesOfPoints+1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+	}
+
+
+	//free data allocation
 	free(points);
 	free(w);
 	freeArraysInGPU();
@@ -169,22 +239,22 @@ void checkValidInputs(int numberOfPoints, int coordinatesOfPoints, double a0, do
 	int flag = 0;
 	if (numberOfPoints< MINIMAL_POINTS_NUMBER || numberOfPoints > MAXIMUM_POINTS_NUMBER)
 	{
-		printf("in valid points number\n");
+		printf("in valid points number");
 		flag = 1;
 	}
 	else if (coordinatesOfPoints > coordinatesOfPoints)
 	{
-		printf("invalid dim number\n");
+		printf("invalid dim number");
 		flag = 1;
 	}
 	else if (aMax / a0 > MAXIMUM_ALPHA_CHECKS)
 	{
-		printf("invalid alpha range\n");
+		printf("invalid alpha range");
 		flag = 1;
 	}
 	else if (limit > MAXIMUM_ITERATION_LIMIT)
 	{
-		printf("invalid limit range\n");
+		printf("invalid limit range");
 		flag = 1;
 	}
 
@@ -193,16 +263,16 @@ void checkValidInputs(int numberOfPoints, int coordinatesOfPoints, double a0, do
 
 }
 
-void initPointDataType(MPI_Datatype* PointMPIDataType, int coordinatesOfPoints)
+void initPointDataType(MPI_Datatype* PointMPIDataType)
 {
 	Point point;
-	MPI_Datatype type[3] = { MPI_INT,MPI_DOUBLE ,MPI_INT };
-	int blockLen[3] = { 1,coordinatesOfPoints,1 };
+	MPI_Datatype type[3] = { MPI_INT,MPI_DOUBLE,MPI_INT };
+	int blockLen[3] = { 1,MAXIMUM_DIM_SIZE + 1,1 };
 	MPI_Aint disp[3];
 
 	// Create MPI user data type for partical
 	disp[0] = (char *)&point.coordinatesOfPoints - (char *)&point;
-	disp[1] = (char *)&point.coordinates - (char *)&point;
+	disp[1] = (char *)point.coordinates - (char *)&point;
 	disp[2] = (char *)&point.classification - (char *)&point;
 
 	MPI_Type_create_struct(3, blockLen, disp, type, PointMPIDataType);
@@ -210,11 +280,27 @@ void initPointDataType(MPI_Datatype* PointMPIDataType, int coordinatesOfPoints)
 	MPI_Type_commit(PointMPIDataType);
 }
 
+void printDataAsIs(Point* points, int numberOfPoints, int coordinatesOfPoints, double a0, double aMax, int limit, double qc)
+{
+	int counter = 0;
+
+	printf("%d %d %f %f %d %f\n", numberOfPoints, coordinatesOfPoints, a0, aMax, limit, qc);
+	int i, j;
+	for (i = 0; i < numberOfPoints; i++)
+	{
+		for (j = 0; j < coordinatesOfPoints + 1; j++)
+		{
+			printf("%f ", points[i].coordinates[j]);
+		}
+		printf("%d\n", points[i].classification);
+		counter++;
+	}
+	printf("total points %d", counter);
+}
+
 int sign(double number)
 {
-
 	return number >= 0 ? 1 : -1;
-
 }
 
 double scalarMult(double* w, Point* point)
@@ -229,16 +315,15 @@ double scalarMult(double* w, Point* point)
 	return sum;
 }
 
-void printWeights(double* w, int size)
+void writeWeights(double* w, int size,FILE* file)
 {
 	int i = 0;
-	printf("\n[");
+	fprintf(file,"[");
 	for (i = 0; i < size; i++)
 	{
-		printf(" %d ", (int)w[i]);
+		fprintf(file," %d ", (int)w[i]);
 	}
-	printf("]\n");
-
+	fprintf(file,"]\n");
 }
 
 double f(double* w, Point* point)
@@ -248,9 +333,7 @@ double f(double* w, Point* point)
 
 void updateWeights(double* last, Point* point, double alpha, int x)
 {
-
 	int i;
-	double fx = f(last, point);
 	for (i = 0; i < point->coordinatesOfPoints + 1; i++)
 	{
 		last[i] = last[i] + alpha * sign(x)  * (point->coordinates[i]);
@@ -261,7 +344,6 @@ double FindNmis(double* w, Point* points, int numOfPoints, double* results, int 
 {
 
 	int i, j;
-	double value = 0;
 	int notCorrectPoints = 0;
 
 	cudaError_t cudaStatus = calculateWithCuda(w, results, numOfPoints, weightSize);
@@ -270,7 +352,7 @@ double FindNmis(double* w, Point* points, int numOfPoints, double* results, int 
 		return 1;
 	}
 
-#pragma omp parallel for private(value) reduction(+: notCorrectPoints)
+	#pragma omp parallel for reduction(+: notCorrectPoints)
 	for (i = 0; i < numOfPoints; i++)
 	{
 		if ((points[i].classification == SET_A && results[i] <= 0) || (points[i].classification == SET_B && results[i] >= 0))
@@ -279,7 +361,7 @@ double FindNmis(double* w, Point* points, int numOfPoints, double* results, int 
 		}
 	}
 
-	return (double)notCorrectPoints / numOfPoints;
+	return (double)notCorrectPoints / (double)numOfPoints;
 
 }
 
@@ -288,15 +370,15 @@ int checkQuality(double q, double qc)
 	return q <= qc ? 1 : 0;
 }
 
-int classified(double* w, Point* point)
+double classified(double* w, Point* point)
 {
 	double  fx = scalarMult(w, point);
 
 	if (point->classification == SET_A && fx >= 0)
-		return 1;
+		return fx;
 
 	if (point->classification == SET_B && fx < 0)
-		return 1;
+		return fx;
 	else
 		return 0;
 
